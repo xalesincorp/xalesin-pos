@@ -1,49 +1,52 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect } from "react";
-import Login from "./pages/Login";
-import Cashier from "./pages/Cashier";
-import NotFound from "./pages/NotFound";
-import PrivateRoute from "./components/PrivateRoute";
-import { useAuthStore } from "./stores/authStore";
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from '@/components/ui/sonner';
+import { useAuthStore } from '@/stores/authStore';
+import PrivateRoute from '@/components/PrivateRoute';
+import Login from '@/pages/Login';
+import Cashier from '@/pages/Cashier';
+import NotFound from '@/pages/NotFound';
 
-const queryClient = new QueryClient();
+function App() {
+  const { checkSession } = useAuthStore();
 
-const App = () => {
-  const { initAuth } = useAuthStore();
-
-  // Initialize auth on app start
+  // Check session on mount
   useEffect(() => {
-    initAuth();
-  }, [initAuth]);
+    checkSession();
+  }, [checkSession]);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Navigate to="/login" replace />} />
-            <Route path="/login" element={<Login />} />
-            <Route 
-              path="/cashier" 
-              element={
-                <PrivateRoute>
-                  <Cashier />
-                </PrivateRoute>
-              } 
-            />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <BrowserRouter>
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Protected Routes */}
+        <Route
+          path="/cashier"
+          element={
+            <PrivateRoute>
+              <Cashier />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Redirects */}
+        <Route path="/" element={<Navigate to="/cashier" replace />} />
+
+        {/* 404 */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+
+      {/* Toast Notifications */}
+      <Toaster 
+        position="top-right"
+        expand={false}
+        richColors
+        closeButton
+      />
+    </BrowserRouter>
   );
-};
+}
 
 export default App;
