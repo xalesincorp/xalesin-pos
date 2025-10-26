@@ -1,4 +1,4 @@
-import { v7 as uuidv7 } from 'uuid';
+import { uuidv7 } from 'uuidv7';
 
 /**
  * Generate UUID v7 (time-sortable, sync-ready)
@@ -8,7 +8,7 @@ import { v7 as uuidv7 } from 'uuid';
  * - Future sync functionality (Version 2.0)
  */
 export function generateUUID() {
-  return uuidv7();
+  return uuidv7(); // Returns UUID v7 (time-sortable)
 }
 
 /**
