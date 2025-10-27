@@ -22,10 +22,9 @@ export const useCashierStore = create(
         set({ isLoading: true, error: null });
 
         try {
-          const products = await db.products
-            .where('deletedAt')
-            .equals(null)
-            .toArray();
+          // Fetch all products and filter for non-deleted ones
+          const allProducts = await db.products.toArray();
+          const products = allProducts.filter(p => !p.deletedAt);
 
           // Calculate stock for recipe goods
           const productsWithStock = await Promise.all(
@@ -54,10 +53,8 @@ export const useCashierStore = create(
       // Fetch categories from IndexedDB
       fetchCategories: async () => {
         try {
-          const categories = await db.categories
-            .where('deletedAt')
-            .equals(null)
-            .toArray();
+          const allCategories = await db.categories.toArray();
+          const categories = allCategories.filter(c => !c.deletedAt);
 
           set({ categories });
         } catch (error) {

@@ -92,6 +92,11 @@ export const useAuthStore = create(
         }
       },
 
+      // Initialize auth (alias for checkSession for compatibility)
+      initAuth: async () => {
+        await get().checkSession();
+      },
+
       // Clear error
       clearError: () => set({ error: null }),
     }),
