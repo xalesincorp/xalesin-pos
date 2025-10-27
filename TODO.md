@@ -1,7 +1,7 @@
 # POS OFFLINE - TASK TO-DO LIST
 ## Version 1.0 - Phase 1.0 (MVP)
 
-**Last Updated**: October 26, 2025  
+**Last Updated**: October 27, 2025  
 **Status**: In Progress
 
 ---
@@ -19,18 +19,28 @@
 - [x] Supabase client setup
 - [x] Login page with Supabase Auth integration
 - [x] Session management (3-day offline)
-- [x] PrivateRoute component
+- [x] PrivateRoute component (removed duplicate .tsx file)
 - [x] Online/offline status detection
 - [x] Design system (Tailwind + semantic tokens)
+- [x] Fixed Vite config (React deduplication, optimizeDeps)
 
-### Sprint 3: Cashier Core (Partial)
-- [x] Header component (Notif bell, Lock, Menu, Online status)
-- [x] ProductCard component (with stock badge)
+### Sprint 3: Cashier Core (Completed)
+- [x] Header component (Notif bell, Lock, Menu, Online status, Search bar)
+- [x] AppSidebar component (Navigation: Kasir, Produk, Inventory, Pelanggan, Laporan, Pengaturan)
+- [x] ProductCard component (stock badge with color-coded indicators)
 - [x] ProductGrid component (with search & filter)
-- [x] SummaryOrder sidebar component
+- [x] SummaryOrder sidebar component (Daftar Order, Pilih Pelanggan, Discount input)
 - [x] EmptyState component
 - [x] SearchBar component
-- [x] Basic Cashier page structure
+- [x] Cashier page structure with sidebar layout
+- [x] Cart functionality (add/remove/update items)
+- [x] Stock deduction logic (finish goods & recipe goods)
+- [x] Recipe stock calculation (auto-calculate from ingredients)
+- [x] Save Order functionality (lock items logic)
+- [x] Load Saved Order functionality
+- [x] Currency formatter (IDR format without decimals)
+- [x] Online/offline status with visual indicator
+- [x] Lock screen state management (uiStore)
 
 ---
 
