@@ -1,176 +1,153 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { toast } from 'sonner';
-import { Store, Loader2, Wifi, WifiOff } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { db } from '@/db/database';
-import { generateUUID } from '@/utils/uuid';
-import { useAuthStore } from '@/stores/authStore';
-import bcrypt from 'bcryptjs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login, isAuthenticated, error: authError } = useAuthStore();
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { isOnline, login, user } = useAuthStore();
+  const [error, setError] = useState('');
 
-  // Redirect if already logged in
+  // Redirect if already authenticated
   useEffect(() => {
-    if (user) {
+    if (isAuthenticated) {
       navigate('/cashier', { replace: true });
     }
-  }, [user, navigate]);
+  }, [isAuthenticated, navigate]);
 
-  const handleLogin = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!email || !password) {
-      toast.error('Email dan password harus diisi');
+    // Validation
+    if (!email.trim() || !password.trim()) {
+      setError('Email dan password harus diisi');
       return;
     }
 
-    if (!isOnline) {
-      toast.error('Login memerlukan koneksi internet. Silakan sambungkan ke internet terlebih dahulu.');
+    if (!email.includes('@')) {
+      setError('Format email tidak valid');
       return;
     }
 
+    setError('');
     setIsLoading(true);
 
     try {
-      // 1. Authenticate with Supabase
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      if (!data.user) {
-        throw new Error('Login gagal');
-      }
-
-      // 2. Check if user exists in local DB
-      let localUser = await db.users
-        .where('supabaseId')
-        .equals(data.user.id)
-        .first();
-
-      // 3. If not exists, create local user record
-      if (!localUser) {
-        const userId = generateUUID();
-        
-        // Generate default PIN (hash of "1234")
-        const defaultPIN = await bcrypt.hash('1234', 10);
-        
-        await db.users.add({
-          id: userId,
-          supabaseId: data.user.id,
-          email: data.user.email,
-          name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User',
-          role: data.user.user_metadata?.role || 'kasir', // Default to 'kasir'
-          pin: defaultPIN,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          deletedAt: null
-        });
-
-        localUser = await db.users.get(userId);
-      }
-
-      // 4. Store session with 3-day expiry
-      login(localUser, data.session.access_token);
-
-      toast.success('Login berhasil!');
-      navigate('/cashier');
+      const success = await login(email, password);
       
-    } catch (error) {
-      console.error('Login error:', error);
-      
-      if (error.message === 'Invalid login credentials') {
-        toast.error('Email atau password salah');
-      } else if (error.message.includes('Email not confirmed')) {
-        toast.error('Email belum diverifikasi. Silakan cek email Anda.');
+      if (success) {
+        navigate('/cashier', { replace: true });
       } else {
-        toast.error('Login gagal. Periksa koneksi internet Anda.');
+        setError(authError || 'Login gagal. Periksa email dan password Anda.');
       }
+    } catch (err) {
+      setError('Terjadi kesalahan. Silakan coba lagi.');
+      console.error('Login error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-primary/10 flex items-center justify-center p-4">
-      {/* Online Status Indicator */}
-      <div className="fixed top-4 right-4 z-50">
-        <div className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium ${
-          isOnline 
-            ? 'bg-success/10 text-success' 
-            : 'bg-destructive/10 text-destructive'
-        }`}>
-          {isOnline ? (
-            <>
-              <Wifi className="w-3 h-3" />
-              <span>Online</span>
-            </>
-          ) : (
-            <>
-              <WifiOff className="w-3 h-3" />
-              <span>Offline</span>
-            </>
-          )}
-        </div>
-      </div>
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !isLoading) {
+      handleSubmit(e);
+    }
+  };
 
-      <Card className="w-full max-w-md shadow-2xl border-0">
-        <CardHeader className="space-y-4 text-center pb-8">
-          <div className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-lg">
-            <Store className="w-8 h-8 text-primary-foreground" />
-          </div>
-          <div>
-            <CardTitle className="text-3xl font-bold">POS Offline</CardTitle>
-            <CardDescription className="text-base mt-2">
-              Sistem kasir untuk UMKM Indonesia
-            </CardDescription>
-          </div>
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4">
+      <Card className="w-full max-w-md shadow-lg">
+        <CardHeader className="space-y-1 text-center">
+          <CardTitle className="text-3xl font-bold tracking-tight">
+            POS System
+          </CardTitle>
+          <CardDescription className="text-base">
+            Masuk ke akun Anda untuk melanjutkan
+          </CardDescription>
         </CardHeader>
+        
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Error Alert */}
+            {error && (
+              <Alert variant="destructive" className="animate-in fade-in-50">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Email Field */}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-sm font-medium">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="nama@bisnis.com"
+                placeholder="nama@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyPress={handleKeyPress}
                 disabled={isLoading}
-                className="h-12"
                 autoComplete="email"
+                autoFocus
+                className="h-11"
+                aria-label="Email"
+                aria-required="true"
               />
             </div>
+
+            {/* Password Field */}
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={isLoading}
-                className="h-12"
-                autoComplete="current-password"
-              />
+              <Label htmlFor="password" className="text-sm font-medium">
+                Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Masukkan password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  disabled={isLoading}
+                  autoComplete="current-password"
+                  className="h-11 pr-10"
+                  aria-label="Password"
+                  aria-required="true"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
+                  disabled={isLoading}
+                  aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
             </div>
+
+            {/* Submit Button */}
             <Button
               type="submit"
-              className="w-full h-12 text-base font-medium"
+              className="w-full h-11 text-base font-medium"
               disabled={isLoading}
             >
               {isLoading ? (
@@ -183,16 +160,15 @@ const Login = () => {
               )}
             </Button>
           </form>
-          <div className="mt-6 space-y-3">
-            <div className="text-center">
-              <p className="text-sm text-muted-foreground">
-                {isOnline 
-                  ? 'Memerlukan koneksi internet untuk login pertama kali' 
-                  : 'Tidak ada koneksi internet. Hubungkan untuk login.'}
-              </p>
-            </div>
-            <div className="text-center text-xs text-muted-foreground">
-              <p>Default PIN: 1234 (ubah setelah login)</p>
+
+          {/* Demo Credentials */}
+          <div className="mt-6 p-4 bg-muted/50 rounded-lg border border-border">
+            <p className="text-xs font-medium text-muted-foreground mb-2">
+              Demo Credentials:
+            </p>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p>Email: <span className="font-mono text-foreground">admin@pos.com</span></p>
+              <p>Password: <span className="font-mono text-foreground">admin123</span></p>
             </div>
           </div>
         </CardContent>

@@ -1,164 +1,205 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCashierStore } from '@/stores/cashierStore';
-import { useUIStore } from '@/stores/uiStore';
-import { db } from '@/db/database';
-import { toast } from 'sonner';
-import Header from '@/components/layout/Header';
+import { useAuthStore } from '@/stores/authStore';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import ProductGrid from '@/components/cashier/ProductGrid';
 import SummaryOrder from '@/components/cashier/SummaryOrder';
 import SearchBar from '@/components/common/SearchBar';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import EmptyState from '@/components/common/EmptyState';
+import { LogOut, User, Store } from 'lucide-react';
+import { toast } from 'sonner';
 
 const Cashier = () => {
-  const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  
+  const navigate = useNavigate();
+  const { user, logout } = useAuthStore();
   const {
-    cart,
-    customer,
-    discount,
+    products,
+    cartItems,
+    isLoading,
+    fetchProducts,
     addToCart,
-    updateCartItemQty,
+    updateCartQuantity,
     removeFromCart,
+    clearCart,
+    checkout
   } = useCashierStore();
 
-  const { setLocked } = useUIStore();
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Load products and categories from database
+  // Fetch products on mount
   useEffect(() => {
-    loadProducts();
-    loadCategories();
+    fetchProducts();
+  }, [fetchProducts]);
+
+  // Filtered products with memoization
+  const filteredProducts = useMemo(() => {
+    if (!searchQuery.trim()) return products;
+
+    const query = searchQuery.toLowerCase();
+    return products.filter(product =>
+      product.name.toLowerCase().includes(query) ||
+      product.sku?.toLowerCase().includes(query) ||
+      product.category?.toLowerCase().includes(query)
+    );
+  }, [products, searchQuery]);
+
+  // Memoized handlers
+  const handleSearch = useCallback((query) => {
+    setSearchQuery(query);
   }, []);
 
-  const loadProducts = async () => {
-    try {
-      const allProducts = await db.products
-        .where('deletedAt')
-        .equals(null)
-        .toArray();
-      setProducts(allProducts);
-    } catch (error) {
-      console.error('Error loading products:', error);
-      toast.error('Gagal memuat produk');
-    }
-  };
+  const handleResetSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
 
-  const loadCategories = async () => {
-    try {
-      const allCategories = await db.categories
-        .where('deletedAt')
-        .equals(null)
-        .toArray();
-      setCategories(allCategories);
-    } catch (error) {
-      console.error('Error loading categories:', error);
-    }
-  };
+  const handleAddToCart = useCallback((product, quantityChange = 1) => {
+    const currentItem = cartItems.find(item => item.id === product.id);
+    const currentQuantity = currentItem ? currentItem.quantity : 0;
+    const newQuantity = currentQuantity + quantityChange;
 
-  const handleProductClick = (product) => {
-    // Check if product has stock (if monitoring is enabled)
-    if (product.monitorStock) {
-      const stock = product.type === 'recipe_goods' 
-        ? product.calculatedStock 
-        : product.currentStock;
-      
-      if (stock <= 0) {
-        toast.error(`${product.name} sedang tidak tersedia`);
-        return;
-      }
+    if (newQuantity <= 0) {
+      removeFromCart(product.id);
+      toast.success(`${product.name} dihapus dari keranjang`);
+      return;
+    }
+
+    if (newQuantity > product.stock) {
+      toast.error('Stok tidak mencukupi');
+      return;
     }
 
     addToCart(product);
-    toast.success(`${product.name} ditambahkan ke keranjang`);
-  };
+    
+    if (quantityChange > 0) {
+      toast.success(`${product.name} ditambahkan ke keranjang`);
+    }
+  }, [cartItems, addToCart, removeFromCart]);
 
-  const handleUpdateQty = (id, newQty) => {
-    if (newQty < 1) return;
-    updateCartItemQty(id, newQty);
-  };
-
-  const handleRemoveItem = (id) => {
-    const item = cart.find(c => c.id === id);
-    if (item?.locked) {
-      toast.error('Tidak dapat menghapus item yang sudah tersimpan');
+  const handleUpdateQuantity = useCallback((productId, newQuantity) => {
+    const product = products.find(p => p.id === productId);
+    
+    if (newQuantity <= 0) {
+      removeFromCart(productId);
+      toast.success('Item dihapus dari keranjang');
       return;
     }
-    removeFromCart(id);
+
+    if (newQuantity > product.stock) {
+      toast.error('Stok tidak mencukupi');
+      return;
+    }
+
+    updateCartQuantity(productId, newQuantity);
+  }, [products, updateCartQuantity, removeFromCart]);
+
+  const handleRemoveItem = useCallback((productId) => {
+    removeFromCart(productId);
     toast.success('Item dihapus dari keranjang');
-  };
+  }, [removeFromCart]);
 
-  const handleSelectCustomer = () => {
-    toast.info('Fitur pilih pelanggan akan segera tersedia');
-  };
+  const handleClearCart = useCallback(() => {
+    clearCart();
+    toast.success('Keranjang dikosongkan');
+  }, [clearCart]);
 
-  const handleSaveOrder = () => {
-    toast.info('Fitur simpan order akan segera tersedia');
-  };
+  const handleCheckout = useCallback(async () => {
+    try {
+      await checkout();
+      toast.success('Transaksi berhasil!', {
+        description: 'Terima kasih atas pembelian Anda'
+      });
+    } catch (error) {
+      toast.error('Checkout gagal', {
+        description: error.message || 'Silakan coba lagi'
+      });
+    }
+  }, [checkout]);
 
-  const handleCheckout = () => {
-    toast.info('Fitur checkout akan segera tersedia');
-  };
-
-  const handleLockScreen = () => {
-    setLocked(true);
-    toast.info('Layar dikunci. Fitur unlock akan segera tersedia');
-  };
+  const handleLogout = useCallback(() => {
+    logout();
+    toast.success('Berhasil logout');
+    navigate('/login', { replace: true });
+  }, [logout, navigate]);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <Header onLockScreen={handleLockScreen} />
-      
-      <div className="flex-1 flex overflow-hidden">
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Search and Filters */}
-          <div className="p-4 border-b space-y-3">
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Cari produk (nama atau SKU)..."
-            />
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Store className="w-6 h-6 text-primary" />
+              <h1 className="text-xl font-bold">POS System</h1>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <Badge variant="secondary" className="hidden sm:flex">
+              Kasir
+            </Badge>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-2 text-sm">
+              <User className="w-4 h-4 text-muted-foreground" />
+              <span className="font-medium">{user?.name || user?.email}</span>
+            </div>
             
-            <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
-              <TabsList className="w-full justify-start overflow-x-auto">
-                <TabsTrigger value="all">Semua</TabsTrigger>
-                {categories.map((category) => (
-                  <TabsTrigger key={category.id} value={category.id}>
-                    {category.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLogout}
+              className="gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="container px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+          {/* Products Section */}
+          <div className="space-y-4">
+            {/* Search Bar */}
+            <SearchBar
+              onSearch={handleSearch}
+              placeholder="Cari produk berdasarkan nama, SKU, atau kategori..."
+            />
+
+            {/* Products Grid */}
+            {isLoading ? (
+              <ProductGrid isLoading={true} />
+            ) : filteredProducts.length > 0 ? (
+              <ProductGrid
+                products={filteredProducts}
+                onAddToCart={handleAddToCart}
+                cartItems={cartItems}
+              />
+            ) : (
+              <EmptyState
+                type={searchQuery ? 'search' : 'empty'}
+                searchTerm={searchQuery}
+                onReset={searchQuery ? handleResetSearch : undefined}
+              />
+            )}
           </div>
 
-          {/* Product Grid */}
-          <div className="flex-1 overflow-hidden">
-            <ProductGrid
-              products={products}
-              onProductClick={handleProductClick}
-              searchQuery={searchQuery}
-              selectedCategory={selectedCategory}
+          {/* Order Summary Section */}
+          <div className="lg:sticky lg:top-20 h-fit">
+            <SummaryOrder
+              cartItems={cartItems}
+              onUpdateQuantity={handleUpdateQuantity}
+              onRemoveItem={handleRemoveItem}
+              onCheckout={handleCheckout}
+              onClearCart={handleClearCart}
             />
           </div>
         </div>
-
-        {/* Order Summary Sidebar */}
-        <div className="w-96 border-l hidden lg:block">
-          <SummaryOrder
-            cart={cart}
-            customer={customer}
-            discount={discount}
-            tax={{ enabled: false, rate: 0, timing: 'after_discount' }}
-            onUpdateQty={handleUpdateQty}
-            onRemoveItem={handleRemoveItem}
-            onSelectCustomer={handleSelectCustomer}
-            onSaveOrder={handleSaveOrder}
-            onCheckout={handleCheckout}
-          />
-        </div>
-      </div>
+      </main>
     </div>
   );
 };

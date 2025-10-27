@@ -1,174 +1,267 @@
+import { memo, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { 
+  ShoppingCart, 
+  Trash2, 
+  Plus, 
+  Minus, 
+  CreditCard,
+  Receipt,
+  AlertCircle
+} from 'lucide-react';
 import { formatCurrency } from '@/utils/formatters';
-import { Trash2, Plus, Minus, User, Save, CreditCard } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
-const SummaryOrder = ({
-  cart,
-  customer,
-  discount,
-  tax,
-  onUpdateQty,
-  onRemoveItem,
-  onSelectCustomer,
-  onSaveOrder,
-  onCheckout
+const SummaryOrder = memo(({ 
+  cartItems = [], 
+  onUpdateQuantity, 
+  onRemoveItem, 
+  onCheckout,
+  onClearCart 
 }) => {
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  
-  let discountAmount = 0;
-  if (discount) {
-    discountAmount = discount.type === 'percent' 
-      ? (subtotal * discount.value / 100)
-      : discount.value;
-  }
+  const [showClearDialog, setShowClearDialog] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  let taxAmount = 0;
-  if (tax.enabled) {
-    const taxBase = tax.timing === 'before_discount' 
-      ? subtotal 
-      : subtotal - discountAmount;
-    taxAmount = taxBase * (tax.rate / 100);
-  }
+  const subtotal = cartItems.reduce(
+    (sum, item) => sum + (item.price * item.quantity), 
+    0
+  );
+  const tax = subtotal * 0.1; // 10% tax
+  const total = subtotal + tax;
+  const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
-  const total = subtotal - discountAmount + taxAmount;
+  const handleCheckout = async () => {
+    if (cartItems.length === 0) return;
+    
+    setIsProcessing(true);
+    try {
+      await onCheckout();
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleClearCart = () => {
+    onClearCart();
+    setShowClearDialog(false);
+  };
 
   return (
-    <Card className="flex flex-col h-full">
-      {/* Header */}
-      <div className="p-4 border-b">
-        <h2 className="text-lg font-bold">Ringkasan Order</h2>
-        <div className="mt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-start"
-            onClick={onSelectCustomer}
-          >
-            <User className="w-4 h-4 mr-2" />
-            {customer ? customer.name : 'Pilih Pelanggan'}
-          </Button>
-        </div>
-      </div>
+    <>
+      <Card className="flex flex-col h-full shadow-lg">
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-xl font-bold flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5" />
+              Keranjang
+            </CardTitle>
+            {totalItems > 0 && (
+              <Badge variant="secondary" className="text-sm font-semibold">
+                {totalItems} Item
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
 
-      {/* Cart Items */}
-      <ScrollArea className="flex-1">
-        <div className="p-4 space-y-3">
-          {cart.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
-              <p className="text-sm">Belum ada produk</p>
+        <Separator />
+
+        {/* Cart Items */}
+        <CardContent className="flex-1 p-0">
+          {cartItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+              <ShoppingCart className="w-16 h-16 text-muted-foreground mb-4" />
+              <p className="text-muted-foreground font-medium">
+                Keranjang masih kosong
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Tambahkan produk untuk memulai
+              </p>
             </div>
           ) : (
-            cart.map((item) => (
-              <div key={item.id} className="space-y-2">
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm line-clamp-2">
-                      {item.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatCurrency(item.price)}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 flex-shrink-0"
-                    onClick={() => onRemoveItem(item.id)}
-                    disabled={item.locked}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => onUpdateQty(item.id, item.qty - 1)}
-                      disabled={item.qty <= 1}
-                    >
-                      <Minus className="w-3 h-3" />
-                    </Button>
-                    <span className="w-12 text-center font-medium">
-                      {item.qty}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => onUpdateQty(item.id, item.qty + 1)}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </Button>
-                  </div>
-                  <p className="font-bold">
-                    {formatCurrency(item.price * item.qty)}
-                  </p>
-                </div>
-                {item.locked && (
-                  <Badge variant="secondary" className="text-xs">
-                    Item tersimpan
-                  </Badge>
-                )}
-                <Separator />
+            <ScrollArea className="h-[calc(100vh-28rem)]">
+              <div className="p-4 space-y-3">
+                {cartItems.map((item) => (
+                  <Card key={item.id} className="overflow-hidden">
+                    <CardContent className="p-3">
+                      <div className="flex gap-3">
+                        {/* Product Image */}
+                        <div className="w-16 h-16 rounded-md bg-muted flex-shrink-0 overflow-hidden">
+                          {item.image ? (
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Receipt className="w-6 h-6 text-muted-foreground" />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Product Info */}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-sm line-clamp-1" title={item.name}>
+                            {item.name}
+                          </h4>
+                          <p className="text-sm text-primary font-semibold mt-1">
+                            {formatCurrency(item.price)}
+                          </p>
+
+                          {/* Quantity Controls */}
+                          <div className="flex items-center gap-2 mt-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
+                              className="h-7 w-7 p-0"
+                              aria-label="Kurangi jumlah"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            
+                            <span className="font-semibold text-sm min-w-[2rem] text-center">
+                              {item.quantity}
+                            </span>
+                            
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
+                              disabled={item.quantity >= item.stock}
+                              className="h-7 w-7 p-0"
+                              aria-label="Tambah jumlah"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onRemoveItem(item.id)}
+                              className="h-7 w-7 p-0 ml-auto text-destructive hover:text-destructive hover:bg-destructive/10"
+                              aria-label="Hapus item"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+
+                          {/* Stock Warning */}
+                          {item.quantity >= item.stock && (
+                            <div className="flex items-center gap-1 mt-1 text-xs text-warning">
+                              <AlertCircle className="w-3 h-3" />
+                              <span>Stok maksimal</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Item Total */}
+                        <div className="text-right">
+                          <p className="font-bold text-sm">
+                            {formatCurrency(item.price * item.quantity)}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-            ))
+            </ScrollArea>
           )}
-        </div>
-      </ScrollArea>
+        </CardContent>
 
-      {/* Summary */}
-      <div className="p-4 border-t space-y-2">
-        <div className="flex justify-between text-sm">
-          <span>Subtotal</span>
-          <span>{formatCurrency(subtotal)}</span>
-        </div>
-        {discount && discountAmount > 0 && (
-          <div className="flex justify-between text-sm text-success">
-            <span>Diskon ({discount.type === 'percent' ? `${discount.value}%` : 'Nominal'})</span>
-            <span>-{formatCurrency(discountAmount)}</span>
-          </div>
-        )}
-        {tax.enabled && (
-          <div className="flex justify-between text-sm">
-            <span>Pajak ({tax.rate}%)</span>
-            <span>{formatCurrency(taxAmount)}</span>
-          </div>
-        )}
-        <Separator />
-        <div className="flex justify-between font-bold text-lg">
-          <span>Total</span>
-          <span className="text-primary">{formatCurrency(total)}</span>
-        </div>
-      </div>
+        {/* Summary Footer */}
+        {cartItems.length > 0 && (
+          <>
+            <Separator />
+            <CardFooter className="flex-col p-4 space-y-4">
+              {/* Price Breakdown */}
+              <div className="w-full space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="font-medium">{formatCurrency(subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Pajak (10%)</span>
+                  <span className="font-medium">{formatCurrency(tax)}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between text-lg font-bold">
+                  <span>Total</span>
+                  <span className="text-primary">{formatCurrency(total)}</span>
+                </div>
+              </div>
 
-      {/* Actions */}
-      <div className="p-4 border-t space-y-2">
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={onSaveOrder}
-          disabled={cart.length === 0}
-        >
-          <Save className="w-4 h-4 mr-2" />
-          Simpan Order
-        </Button>
-        <Button
-          className="w-full"
-          onClick={onCheckout}
-          disabled={cart.length === 0}
-        >
-          <CreditCard className="w-4 h-4 mr-2" />
-          Checkout
-        </Button>
-      </div>
-    </Card>
+              {/* Action Buttons */}
+              <div className="w-full space-y-2">
+                <Button
+                  onClick={handleCheckout}
+                  disabled={isProcessing}
+                  className="w-full h-11 text-base font-semibold"
+                  size="lg"
+                >
+                  {isProcessing ? (
+                    <>
+                      <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
+                      Memproses...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Checkout
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  onClick={() => setShowClearDialog(true)}
+                  variant="outline"
+                  className="w-full"
+                  disabled={isProcessing}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Kosongkan Keranjang
+                </Button>
+              </div>
+            </CardFooter>
+          </>
+        )}
+      </Card>
+
+      {/* Clear Cart Confirmation Dialog */}
+      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kosongkan Keranjang?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Semua item dalam keranjang akan dihapus. Tindakan ini tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClearCart} className="bg-destructive hover:bg-destructive/90">
+              Ya, Kosongkan
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
-};
+});
+
+SummaryOrder.displayName = 'SummaryOrder';
 
 export default SummaryOrder;

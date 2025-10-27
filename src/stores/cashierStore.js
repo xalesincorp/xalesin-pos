@@ -1,208 +1,203 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import { supabase } from '@/integrations/supabase/client';
+import { generateUUID } from '@/utils/uuid';
 
-/**
- * Cashier Store
- * Manages cart, checkout, and cashier UI state
- */
-export const useCashierStore = create((set, get) => ({
-  // Cart State
-  cart: [], // Array of cart items: { productId, name, price, qty, locked, ... }
-  customer: null, // Selected customer
-  discount: { type: 'none', value: 0 }, // Discount: { type: 'percent' | 'amount' | 'none', value: number }
-  notes: '', // Order notes
-  
-  // Saved Order State
-  loadedOrderId: null, // ID of loaded saved order (for update)
-  
-  // UI State
-  isCheckoutOpen: false, // Checkout modal state
-  isLocked: false, // Lock screen state
-  searchQuery: '', // Product search query
-  selectedCategory: null, // Filter by category
-  
-  // Actions
-  
-  /**
-   * Add product to cart
-   */
-  addToCart: (product) => {
-    const { cart } = get();
-    const existingIndex = cart.findIndex(item => item.productId === product.id);
-    
-    if (existingIndex >= 0) {
-      // Update quantity if product already in cart
-      const newCart = [...cart];
-      newCart[existingIndex] = {
-        ...newCart[existingIndex],
-        qty: newCart[existingIndex].qty + 1
-      };
-      set({ cart: newCart });
-    } else {
-      // Add new product to cart
-      set({ 
-        cart: [...cart, {
-          productId: product.id,
-          name: product.name,
-          price: product.price,
-          qty: 1,
-          locked: false, // Not locked by default
-          image: product.image,
-          type: product.type
-        }]
-      });
+export const useCashierStore = create(
+  persist(
+    (set, get) => ({
+      products: [],
+      cartItems: [],
+      transactions: [],
+      isLoading: false,
+      error: null,
+
+      // Fetch products from Supabase
+      fetchProducts: async () => {
+        set({ isLoading: true, error: null });
+
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .order('name', { ascending: true });
+
+          if (error) throw error;
+
+          set({
+            products: data || [],
+            isLoading: false,
+          });
+        } catch (error) {
+          console.error('Fetch products error:', error);
+          set({
+            error: error.message || 'Gagal memuat produk',
+            isLoading: false,
+          });
+        }
+      },
+
+      // Add product to cart
+      addToCart: (product) => {
+        const { cartItems } = get();
+        const existingItem = cartItems.find(item => item.id === product.id);
+
+        if (existingItem) {
+          // Increment quantity
+          set({
+            cartItems: cartItems.map(item =>
+              item.id === product.id
+                ? { ...item, quantity: item.quantity + 1 }
+                : item
+            ),
+          });
+        } else {
+          // Add new item
+          set({
+            cartItems: [
+              ...cartItems,
+              {
+                ...product,
+                quantity: 1,
+              },
+            ],
+          });
+        }
+      },
+
+      // Update cart item quantity
+      updateCartQuantity: (productId, newQuantity) => {
+        const { cartItems } = get();
+
+        if (newQuantity <= 0) {
+          // Remove item if quantity is 0 or less
+          set({
+            cartItems: cartItems.filter(item => item.id !== productId),
+          });
+        } else {
+          // Update quantity
+          set({
+            cartItems: cartItems.map(item =>
+              item.id === productId
+                ? { ...item, quantity: newQuantity }
+                : item
+            ),
+          });
+        }
+      },
+
+      // Remove item from cart
+      removeFromCart: (productId) => {
+        const { cartItems } = get();
+        set({
+          cartItems: cartItems.filter(item => item.id !== productId),
+        });
+      },
+
+      // Clear cart
+      clearCart: () => {
+        set({ cartItems: [] });
+      },
+
+      // Checkout
+      checkout: async () => {
+        const { cartItems, transactions } = get();
+
+        if (cartItems.length === 0) {
+          throw new Error('Keranjang kosong');
+        }
+
+        set({ isLoading: true, error: null });
+
+        try {
+          // Calculate totals
+          const subtotal = cartItems.reduce(
+            (sum, item) => sum + item.price * item.quantity,
+            0
+          );
+          const tax = subtotal * 0.1;
+          const total = subtotal + tax;
+
+          // Create transaction
+          const transaction = {
+            id: generateUUID(),
+            items: cartItems,
+            subtotal,
+            tax,
+            total,
+            timestamp: new Date().toISOString(),
+          };
+
+          // Save to Supabase
+          const { error } = await supabase
+            .from('transactions')
+            .insert({
+              id: transaction.id,
+              items: transaction.items,
+              subtotal: transaction.subtotal,
+              tax: transaction.tax,
+              total: transaction.total,
+            });
+
+          if (error) throw error;
+
+          // Update local state
+          set({
+            transactions: [transaction, ...transactions],
+            cartItems: [],
+            isLoading: false,
+          });
+
+          // Update product stock
+          for (const item of cartItems) {
+            const { error: stockError } = await supabase
+              .from('products')
+              .update({ stock: item.stock - item.quantity })
+              .eq('id', item.id);
+
+            if (stockError) {
+              console.error('Stock update error:', stockError);
+            }
+          }
+
+          // Refresh products
+          await get().fetchProducts();
+
+          return transaction;
+        } catch (error) {
+          console.error('Checkout error:', error);
+          set({
+            error: error.message || 'Checkout gagal',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+
+      // Get cart total
+      getCartTotal: () => {
+        const { cartItems } = get();
+        return cartItems.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0
+        );
+      },
+
+      // Get cart item count
+      getCartItemCount: () => {
+        const { cartItems } = get();
+        return cartItems.reduce((sum, item) => sum + item.quantity, 0);
+      },
+
+      // Clear error
+      clearError: () => set({ error: null }),
+    }),
+    {
+      name: 'cashier-storage',
+      partialize: (state) => ({
+        cartItems: state.cartItems,
+        transactions: state.transactions,
+      }),
     }
-  },
-  
-  /**
-   * Update cart item quantity
-   */
-  updateCartQuantity: (productId, qty) => {
-    const { cart } = get();
-    
-    if (qty <= 0) {
-      // Remove item if quantity is 0
-      set({ cart: cart.filter(item => item.productId !== productId) });
-    } else {
-      // Update quantity
-      const newCart = cart.map(item => 
-        item.productId === productId ? { ...item, qty } : item
-      );
-      set({ cart: newCart });
-    }
-  },
-  
-  /**
-   * Remove item from cart (if not locked)
-   */
-  removeFromCart: (productId) => {
-    const { cart } = get();
-    const item = cart.find(i => i.productId === productId);
-    
-    // Check if item is locked (from saved order)
-    if (item?.locked) {
-      return false; // Cannot remove locked items
-    }
-    
-    set({ cart: cart.filter(item => item.productId !== productId) });
-    return true;
-  },
-  
-  /**
-   * Clear entire cart
-   */
-  clearCart: () => {
-    set({ 
-      cart: [], 
-      customer: null, 
-      discount: { type: 'none', value: 0 },
-      notes: '',
-      loadedOrderId: null
-    });
-  },
-  
-  /**
-   * Load saved order into cart
-   */
-  loadSavedOrder: (order) => {
-    // Mark existing items as locked
-    const cartItems = order.items.map(item => ({
-      ...item,
-      locked: true // Lock items from saved order
-    }));
-    
-    set({
-      cart: cartItems,
-      customer: order.customer,
-      discount: order.discount || { type: 'none', value: 0 },
-      notes: order.notes || '',
-      loadedOrderId: order.id
-    });
-  },
-  
-  /**
-   * Set customer
-   */
-  setCustomer: (customer) => set({ customer }),
-  
-  /**
-   * Set discount
-   */
-  setDiscount: (discount) => set({ discount }),
-  
-  /**
-   * Set notes
-   */
-  setNotes: (notes) => set({ notes }),
-  
-  /**
-   * Calculate subtotal
-   */
-  getSubtotal: () => {
-    const { cart } = get();
-    return cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  },
-  
-  /**
-   * Calculate discount amount
-   */
-  getDiscountAmount: (subtotal) => {
-    const { discount } = get();
-    
-    if (discount.type === 'percent') {
-      return subtotal * (discount.value / 100);
-    } else if (discount.type === 'amount') {
-      return discount.value;
-    }
-    
-    return 0;
-  },
-  
-  /**
-   * Calculate total (with tax and discount from settings)
-   */
-  getTotal: (settings) => {
-    const subtotal = get().getSubtotal();
-    const discountAmount = get().getDiscountAmount(subtotal);
-    
-    if (!settings?.tax_settings?.enabled) {
-      return subtotal - discountAmount;
-    }
-    
-    const taxRate = settings.tax_settings.rate / 100;
-    const taxTiming = settings.tax_settings.timing;
-    
-    if (taxTiming === 'before_discount') {
-      const tax = subtotal * taxRate;
-      return subtotal + tax - discountAmount;
-    } else if (taxTiming === 'after_discount') {
-      const afterDiscount = subtotal - discountAmount;
-      const tax = afterDiscount * taxRate;
-      return afterDiscount + tax;
-    } else if (taxTiming === 'included') {
-      // Tax already in price
-      return subtotal - discountAmount;
-    }
-    
-    return subtotal - discountAmount;
-  },
-  
-  /**
-   * Toggle checkout modal
-   */
-  setCheckoutOpen: (isOpen) => set({ isCheckoutOpen: isOpen }),
-  
-  /**
-   * Lock/unlock screen
-   */
-  setLocked: (isLocked) => set({ isLocked }),
-  
-  /**
-   * Set search query
-   */
-  setSearchQuery: (query) => set({ searchQuery: query }),
-  
-  /**
-   * Set selected category filter
-   */
-  setSelectedCategory: (categoryId) => set({ selectedCategory: categoryId })
-}));
+  )
+);
