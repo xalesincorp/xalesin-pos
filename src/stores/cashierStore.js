@@ -1,31 +1,45 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { supabase } from '@/integrations/supabase/client';
+import { db } from '@/db/database';
 import { generateUUID } from '@/utils/uuid';
 
+/**
+ * Cashier Store - Offline-first using Dexie.js
+ * Manages products, cart, and transactions for the POS system
+ */
 export const useCashierStore = create(
   persist(
     (set, get) => ({
       products: [],
+      categories: [],
       cartItems: [],
-      transactions: [],
+      savedOrders: [],
       isLoading: false,
       error: null,
 
-      // Fetch products from Supabase
+      // Fetch products from IndexedDB
       fetchProducts: async () => {
         set({ isLoading: true, error: null });
 
         try {
-          const { data, error } = await supabase
-            .from('products')
-            .select('*')
-            .order('name', { ascending: true });
+          const products = await db.products
+            .where('deletedAt')
+            .equals(null)
+            .toArray();
 
-          if (error) throw error;
+          // Calculate stock for recipe goods
+          const productsWithStock = await Promise.all(
+            products.map(async (product) => {
+              if (product.type === 'recipe_goods' && product.recipe) {
+                const calculatedStock = await calculateRecipeStock(product);
+                return { ...product, currentStock: calculatedStock };
+              }
+              return product;
+            })
+          );
 
           set({
-            products: data || [],
+            products: productsWithStock,
             isLoading: false,
           });
         } catch (error) {
@@ -37,16 +51,30 @@ export const useCashierStore = create(
         }
       },
 
+      // Fetch categories from IndexedDB
+      fetchCategories: async () => {
+        try {
+          const categories = await db.categories
+            .where('deletedAt')
+            .equals(null)
+            .toArray();
+
+          set({ categories });
+        } catch (error) {
+          console.error('Fetch categories error:', error);
+        }
+      },
+
       // Add product to cart
       addToCart: (product) => {
         const { cartItems } = get();
-        const existingItem = cartItems.find(item => item.id === product.id);
+        const existingItem = cartItems.find(item => item.productId === product.id);
 
         if (existingItem) {
           // Increment quantity
           set({
             cartItems: cartItems.map(item =>
-              item.id === product.id
+              item.productId === product.id
                 ? { ...item, quantity: item.quantity + 1 }
                 : item
             ),
@@ -57,8 +85,13 @@ export const useCashierStore = create(
             cartItems: [
               ...cartItems,
               {
-                ...product,
+                productId: product.id,
+                name: product.name,
+                price: product.price,
                 quantity: 1,
+                locked: false, // Not locked by default
+                type: product.type,
+                recipe: product.recipe,
               },
             ],
           });
@@ -72,13 +105,13 @@ export const useCashierStore = create(
         if (newQuantity <= 0) {
           // Remove item if quantity is 0 or less
           set({
-            cartItems: cartItems.filter(item => item.id !== productId),
+            cartItems: cartItems.filter(item => item.productId !== productId),
           });
         } else {
           // Update quantity
           set({
             cartItems: cartItems.map(item =>
-              item.id === productId
+              item.productId === productId
                 ? { ...item, quantity: newQuantity }
                 : item
             ),
@@ -90,7 +123,7 @@ export const useCashierStore = create(
       removeFromCart: (productId) => {
         const { cartItems } = get();
         set({
-          cartItems: cartItems.filter(item => item.id !== productId),
+          cartItems: cartItems.filter(item => item.productId !== productId),
         });
       },
 
@@ -99,9 +132,61 @@ export const useCashierStore = create(
         set({ cartItems: [] });
       },
 
+      // Save order (to Daftar Order)
+      saveOrder: async (customerName = null) => {
+        const { cartItems } = get();
+
+        if (cartItems.length === 0) {
+          throw new Error('Keranjang kosong');
+        }
+
+        try {
+          const orderId = generateUUID();
+          const order = {
+            id: orderId,
+            status: 'saved',
+            items: cartItems.map(item => ({ ...item, locked: true })), // Lock all items
+            customerName,
+            savedAt: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+
+          // Save to IndexedDB
+          await db.transactions.add(order);
+
+          // Clear cart
+          set({ cartItems: [] });
+
+          return order;
+        } catch (error) {
+          console.error('Save order error:', error);
+          throw error;
+        }
+      },
+
+      // Load saved order to cart
+      loadSavedOrder: async (orderId) => {
+        try {
+          const order = await db.transactions.get(orderId);
+
+          if (!order) {
+            throw new Error('Order tidak ditemukan');
+          }
+
+          // Load items to cart (preserve locked status)
+          set({ cartItems: order.items });
+
+          return order;
+        } catch (error) {
+          console.error('Load saved order error:', error);
+          throw error;
+        }
+      },
+
       // Checkout
-      checkout: async () => {
-        const { cartItems, transactions } = get();
+      checkout: async (paymentData) => {
+        const { cartItems } = get();
 
         if (cartItems.length === 0) {
           throw new Error('Keranjang kosong');
@@ -115,50 +200,44 @@ export const useCashierStore = create(
             (sum, item) => sum + item.price * item.quantity,
             0
           );
-          const tax = subtotal * 0.1;
-          const total = subtotal + tax;
+
+          // Apply tax and discount based on settings
+          // TODO: Get settings from settingsStore
+          const tax = subtotal * 0.1; // 10% default
+          const discount = 0; // TODO: Apply discount logic
+          const total = subtotal + tax - discount;
 
           // Create transaction
+          const transactionId = generateUUID();
           const transaction = {
-            id: generateUUID(),
+            id: transactionId,
+            transactionNumber: `TRX-${Date.now()}`,
+            status: paymentData.status || 'paid', // 'paid' or 'unpaid'
             items: cartItems,
             subtotal,
             tax,
+            discount,
             total,
-            timestamp: new Date().toISOString(),
+            payments: paymentData.payments || [],
+            customerName: paymentData.customerName,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            paidAt: paymentData.status === 'paid' ? new Date() : null,
           };
 
-          // Save to Supabase
-          const { error } = await supabase
-            .from('transactions')
-            .insert({
-              id: transaction.id,
-              items: transaction.items,
-              subtotal: transaction.subtotal,
-              tax: transaction.tax,
-              total: transaction.total,
-            });
+          // Save transaction to IndexedDB
+          await db.transactions.add(transaction);
 
-          if (error) throw error;
+          // Deduct stock for paid transactions
+          if (transaction.status === 'paid') {
+            await deductStock(cartItems);
+          }
 
-          // Update local state
+          // Clear cart
           set({
-            transactions: [transaction, ...transactions],
             cartItems: [],
             isLoading: false,
           });
-
-          // Update product stock
-          for (const item of cartItems) {
-            const { error: stockError } = await supabase
-              .from('products')
-              .update({ stock: item.stock - item.quantity })
-              .eq('id', item.id);
-
-            if (stockError) {
-              console.error('Stock update error:', stockError);
-            }
-          }
 
           // Refresh products
           await get().fetchProducts();
@@ -196,8 +275,63 @@ export const useCashierStore = create(
       name: 'cashier-storage',
       partialize: (state) => ({
         cartItems: state.cartItems,
-        transactions: state.transactions,
       }),
     }
   )
 );
+
+/**
+ * Calculate stock for recipe goods
+ * Returns the minimum possible portions based on ingredient availability
+ */
+async function calculateRecipeStock(product) {
+  if (!product.recipe || product.recipe.length === 0) {
+    return 0;
+  }
+
+  try {
+    const materialStocks = await Promise.all(
+      product.recipe.map(async (ingredient) => {
+        const material = await db.products.get(ingredient.materialId);
+        if (!material) return 0;
+        return Math.floor(material.currentStock / ingredient.qty);
+      })
+    );
+
+    return Math.min(...materialStocks);
+  } catch (error) {
+    console.error('Calculate recipe stock error:', error);
+    return 0;
+  }
+}
+
+/**
+ * Deduct stock after payment
+ * Handles both finish goods and recipe goods
+ */
+async function deductStock(cartItems) {
+  for (const item of cartItems) {
+    const product = await db.products.get(item.productId);
+
+    if (!product) continue;
+
+    if (product.type === 'finish_goods' || product.type === 'raw_material') {
+      // Direct deduction
+      await db.products.update(product.id, {
+        currentStock: product.currentStock - item.quantity,
+        updatedAt: new Date(),
+      });
+    } else if (product.type === 'recipe_goods' && product.recipe) {
+      // Deduct each ingredient
+      for (const ingredient of product.recipe) {
+        const material = await db.products.get(ingredient.materialId);
+        if (material) {
+          await db.products.update(material.id, {
+            currentStock: material.currentStock - (ingredient.qty * item.quantity),
+            updatedAt: new Date(),
+          });
+        }
+      }
+    }
+  }
+}
