@@ -9,7 +9,7 @@ const ProductGrid = memo(({
   isLoading = false 
 }) => {
   const getCartQuantity = (productId) => {
-    const cartItem = cartItems.find(item => item.id === productId);
+    const cartItem = cartItems.find(item => item.productId === productId);
     return cartItem ? cartItem.quantity : 0;
   };
 

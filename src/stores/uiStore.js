@@ -13,12 +13,24 @@ export const useUIStore = create((set) => ({
   unreadNotifications: 0,
   unpaidTransactionCount: 0,
   
+  // Online/Offline status
+  isOnline: typeof window !== 'undefined' ? navigator.onLine : true,
+  
+  // Lock screen
+  isLocked: false,
+  
   // Actions
   setLoading: (isLoading, message = '') => set({ isLoading, loadingMessage: message }),
   
   setUnreadNotifications: (count) => set({ unreadNotifications: count }),
   
   setUnpaidTransactionCount: (count) => set({ unpaidTransactionCount: count }),
+  
+  setOnline: (status) => set({ isOnline: status }),
+  
+  lockScreen: () => set({ isLocked: true }),
+  
+  unlockScreen: () => set({ isLocked: false }),
   
   /**
    * Update notification counts
@@ -42,3 +54,14 @@ export const useUIStore = create((set) => ({
     }
   }
 }));
+
+// Listen to online/offline events
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    useUIStore.getState().setOnline(true);
+  });
+  
+  window.addEventListener('offline', () => {
+    useUIStore.getState().setOnline(false);
+  });
+}

@@ -13,7 +13,7 @@ export const formatCurrency = (amount) => {
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(amount).replace('IDR', 'Rp').trim();
 };
 
 /**

@@ -2,19 +2,22 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCashierStore } from '@/stores/cashierStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useUIStore } from '@/stores/uiStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { AppSidebar } from '@/components/layout/AppSidebar';
 import ProductGrid from '@/components/cashier/ProductGrid';
 import SummaryOrder from '@/components/cashier/SummaryOrder';
-import SearchBar from '@/components/common/SearchBar';
 import EmptyState from '@/components/common/EmptyState';
-import { LogOut, User, Store } from 'lucide-react';
+import { Bell, Lock, Grid3x3, ChevronLeft, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Cashier = () => {
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
+  const { isOnline } = useUIStore();
   const {
     products,
     cartItems,
@@ -23,7 +26,7 @@ const Cashier = () => {
     addToCart,
     updateCartQuantity,
     removeFromCart,
-    clearCart,
+    saveOrder,
     checkout
   } = useCashierStore();
 
@@ -100,14 +103,20 @@ const Cashier = () => {
     toast.success('Item dihapus dari keranjang');
   }, [removeFromCart]);
 
-  const handleClearCart = useCallback(() => {
-    clearCart();
-    toast.success('Keranjang dikosongkan');
-  }, [clearCart]);
-
-  const handleCheckout = useCallback(async () => {
+  const handleSaveOrder = useCallback(async () => {
     try {
-      await checkout();
+      await saveOrder();
+      toast.success('Order berhasil disimpan');
+    } catch (error) {
+      toast.error('Gagal menyimpan order', {
+        description: error.message
+      });
+    }
+  }, [saveOrder]);
+
+  const handleCheckout = useCallback(async (data) => {
+    try {
+      await checkout(data);
       toast.success('Transaksi berhasil!', {
         description: 'Terima kasih atas pembelian Anda'
       });
@@ -118,89 +127,98 @@ const Cashier = () => {
     }
   }, [checkout]);
 
-  const handleLogout = useCallback(() => {
-    logout();
-    toast.success('Berhasil logout');
-    navigate('/login', { replace: true });
-  }, [logout, navigate]);
-
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Store className="w-6 h-6 text-primary" />
-              <h1 className="text-xl font-bold">POS System</h1>
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        
+        <div className="flex-1 flex flex-col">
+          {/* Header */}
+          <header className="sticky top-0 z-40 border-b bg-background">
+            <div className="flex h-14 items-center gap-4 px-4">
+              <SidebarTrigger>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </SidebarTrigger>
+
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold">POS</div>
+                <div className="text-xs text-muted-foreground">Offline System</div>
+              </div>
+
+              <Badge 
+                variant={isOnline ? "default" : "secondary"} 
+                className="ml-2"
+              >
+                <div className={`w-2 h-2 rounded-full mr-2 ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+                {isOnline ? 'Online' : 'Offline'}
+              </Badge>
+
+              <div className="flex-1 max-w-md mx-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Cari products..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" className="h-8 w-8 relative">
+                  <Bell className="h-4 w-4" />
+                  <span className="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Lock className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Grid3x3 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-            <Separator orientation="vertical" className="h-6" />
-            <Badge variant="secondary" className="hidden sm:flex">
-              Kasir
-            </Badge>
-          </div>
+          </header>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 text-sm">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <span className="font-medium">{user?.name || user?.email}</span>
+          {/* Main Content */}
+          <main className="flex-1 overflow-auto">
+            <div className="flex gap-4 p-4 h-full">
+              {/* Products Section */}
+              <div className="flex-1 space-y-4">
+                {isLoading ? (
+                  <ProductGrid isLoading={true} />
+                ) : filteredProducts.length > 0 ? (
+                  <ProductGrid
+                    products={filteredProducts}
+                    onAddToCart={handleAddToCart}
+                    cartItems={cartItems}
+                  />
+                ) : (
+                  <EmptyState
+                    type={searchQuery ? 'search' : 'empty'}
+                    searchTerm={searchQuery}
+                    onReset={searchQuery ? handleResetSearch : undefined}
+                  />
+                )}
+              </div>
+
+              {/* Order Summary Section */}
+              <div className="w-[380px]">
+                <SummaryOrder
+                  cartItems={cartItems}
+                  onUpdateQuantity={handleUpdateQuantity}
+                  onRemoveItem={handleRemoveItem}
+                  onCheckout={handleCheckout}
+                  onSaveOrder={handleSaveOrder}
+                />
+              </div>
             </div>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLogout}
-              className="gap-2"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
-          </div>
+          </main>
         </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="container px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
-          {/* Products Section */}
-          <div className="space-y-4">
-            {/* Search Bar */}
-            <SearchBar
-              onSearch={handleSearch}
-              placeholder="Cari produk berdasarkan nama, SKU, atau kategori..."
-            />
-
-            {/* Products Grid */}
-            {isLoading ? (
-              <ProductGrid isLoading={true} />
-            ) : filteredProducts.length > 0 ? (
-              <ProductGrid
-                products={filteredProducts}
-                onAddToCart={handleAddToCart}
-                cartItems={cartItems}
-              />
-            ) : (
-              <EmptyState
-                type={searchQuery ? 'search' : 'empty'}
-                searchTerm={searchQuery}
-                onReset={searchQuery ? handleResetSearch : undefined}
-              />
-            )}
-          </div>
-
-          {/* Order Summary Section */}
-          <div className="lg:sticky lg:top-20 h-fit">
-            <SummaryOrder
-              cartItems={cartItems}
-              onUpdateQuantity={handleUpdateQuantity}
-              onRemoveItem={handleRemoveItem}
-              onCheckout={handleCheckout}
-              onClearCart={handleClearCart}
-            />
-          </div>
-        </div>
-      </main>
-    </div>
+      </div>
+    </SidebarProvider>
   );
 };
 
